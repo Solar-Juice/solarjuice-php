@@ -158,9 +158,9 @@ $created = $client->orders->create([
     ],
 ]);
 
-$created->id();              // ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD
-$created->status();          // received
-$created->idempotencyKey;    // log this next to the order id
+$created->id();              // ord_01j6zk3m5x8qw2r7y9v4b1n0pd
+$created->status();          // accepted
+$created->idempotencyKey;    // local correlation value only, the API ignores it
 ```
 
 Money is a decimal string with two places, never a float. Totals on the response
@@ -168,20 +168,27 @@ are computed server side and are authoritative.
 
 ### Idempotency
 
-Every create sends an `Idempotency-Key` header. Pass your own, or the client
-generates a UUID v4 and hands it back on the result so you can log it with the
-order id. That pair is what lets you reconcile if a create times out and you do
-not know whether it landed.
+`client_reference` in the body is the only idempotency key. The same reference
+with the same body returns the order that already exists (`200` rather than the
+first call's `202`); the same reference with a different body is refused with
+`IDEMPOTENCY_CONFLICT`. Sandbox and live keys have separate reference
+namespaces.
 
-The key that governs the API's own behaviour is `client_reference` in the body:
-the same reference with the same body returns the original receipt, and the same
-reference with a different body is refused with `IDEMPOTENCY_CONFLICT`.
+Every create also sends an `Idempotency-Key` header, yours or a generated UUID
+v4, and hands it back on the result. The API accepts that header and ignores
+it: it is not stored, not compared and not returned, so it is a local
+correlation value for your own logs. If a create times out, do not look for the
+order by that key, look for it by your own reference:
+
+```php
+$page = $client->orders()->list(['client_reference' => 'PO-88213']);
+```
 
 ### Polling an order
 
-Acceptance is asynchronous. An order comes back `received` and normally reaches
-`accepted` within seconds. Poll with the ETag, and a `304` is reported rather
-than thrown:
+Validation and acceptance are synchronous: an order comes back already
+`accepted`. What you are polling for is fulfilment, which operations drive.
+Poll with the ETag, and a `304` is reported rather than thrown:
 
 ```php
 $fetched = $client->orders->get($orderId, $etag);
@@ -251,7 +258,8 @@ whenever the API sends one. Other 4xx responses are not retried: they describe
 the request, so repeating it would only spend allowance.
 
 Both POST endpoints are safe to retry. Quotes have no side effects, and orders
-carry the idempotency key. Set `maxRetries: 0` to handle it yourself.
+are deduplicated by `client_reference`. Set `maxRetries: 0` to handle it
+yourself.
 
 ## Rate limits
 
