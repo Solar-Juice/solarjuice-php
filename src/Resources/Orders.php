@@ -24,10 +24,11 @@ final class Orders extends ApiResource
      * Place an order.
      *
      * An Idempotency-Key header is always sent, generated here when the caller
-     * does not supply one. It is what makes the request safe to retry after a
-     * timeout, and it is returned on the result so it can be logged next to the
-     * order id. Note that the API's own idempotency turns on `client_reference`
-     * in the body; the header is recorded for your reconciliation.
+     * does not supply one, and returned on the result so it can be logged next
+     * to the order id. The API's idempotency turns on `client_reference` in the
+     * body: no handler reads the header, and it is neither stored nor returned,
+     * so it is a local correlation value only. After a timeout, look the order
+     * up by your own reference, never by the key.
      *
      * @param array<string, mixed> $order The OrderRequest body.
      * @param string|null $idempotencyKey Your own key, or null to generate a UUID v4.
@@ -107,6 +108,34 @@ final class Orders extends ApiResource
         }
 
         return new FetchedOrder($response->data(), false, $etag);
+    }
+
+    /**
+     * Cancel an order before operations key it into the fulfilment system.
+     *
+     * A partner can cancel while the order is `received`, `accepted` or
+     * `on_hold`. Past that the API refuses with `VALIDATION_FAILED` and the
+     * cancellation has to go through an account manager, so read `status` on
+     * the order you hold before calling. There is no un-cancel.
+     *
+     * @param string $id The order id.
+     * @param string|null $note Why it is being cancelled, recorded on the event. Defaults server side to
+     *                          "cancelled by partner".
+     *
+     * @return array<string, mixed> The order at its new status, with the cancellation appended to `events`.
+     */
+    public function cancel(string $id, ?string $note = null): array
+    {
+        return $this->requester
+            ->send(
+                'POST',
+                self::PATH . '/' . rawurlencode($id) . '/cancel',
+                [],
+                // The body is optional, so with no note there is no body at all
+                // rather than an empty object.
+                $note === null ? null : ['note' => $note],
+            )
+            ->data();
     }
 
     /**

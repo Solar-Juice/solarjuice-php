@@ -12,6 +12,15 @@ namespace SolarJuice\PartnerApi\Internal;
 final class RetryAfter
 {
     /**
+     * The longest wait the retry loop will actually sleep for.
+     *
+     * The API's own Retry-After values are single or double digit seconds. A
+     * far larger one comes from an edge proxy, and blocking a synchronous PHP
+     * request on it is worse than failing fast.
+     */
+    public const MAX_HONOURED_SECONDS = 60.0;
+
+    /**
      * RFC 9110 allows either a delay in seconds or an HTTP date. Both forms are
      * reduced to seconds from now, so callers never have to care which was sent.
      *

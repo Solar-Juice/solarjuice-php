@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SolarJuice\PartnerApi\Http;
 
+use SolarJuice\PartnerApi\ApiKey;
+
 /**
  * An outgoing HTTP request, fully resolved.
  *
@@ -25,6 +27,29 @@ final class Request
         public readonly ?string $body = null,
         public readonly float $timeout = 30.0,
     ) {
+    }
+
+    /**
+     * Keeps the bearer token out of a dumped request. The header itself is
+     * untouched: this only changes what `print_r` and `var_dump` print.
+     *
+     * @return array<string, mixed>
+     */
+    public function __debugInfo(): array
+    {
+        $headers = $this->headers;
+
+        if (isset($headers['Authorization'])) {
+            $headers['Authorization'] = 'Bearer ' . ApiKey::REDACTED;
+        }
+
+        return [
+            'method' => $this->method,
+            'url' => $this->url,
+            'headers' => $headers,
+            'body' => $this->body,
+            'timeout' => $this->timeout,
+        ];
     }
 
     /**

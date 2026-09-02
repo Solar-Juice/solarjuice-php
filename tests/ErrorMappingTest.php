@@ -7,6 +7,7 @@ namespace SolarJuice\PartnerApi\Tests;
 use PHPUnit\Framework\TestCase;
 use SolarJuice\PartnerApi\ErrorCode;
 use SolarJuice\PartnerApi\Exception\ApiException;
+use SolarJuice\PartnerApi\Exception\ErrorFactory;
 use SolarJuice\PartnerApi\Exception\ForbiddenException;
 use SolarJuice\PartnerApi\Exception\IdempotencyConflictException;
 use SolarJuice\PartnerApi\Exception\InternalException;
@@ -114,9 +115,83 @@ final class ErrorMappingTest extends TestCase
             self::fail('Expected a ForbiddenException.');
         } catch (ApiException $exception) {
             self::assertInstanceOf(ForbiddenException::class, $exception);
-            self::assertNull($exception->errorCode);
+            // The code is synthesised from the status so that a partner
+            // switching on errorCode still works behind an edge proxy.
+            self::assertSame('FORBIDDEN', $exception->errorCode);
             self::assertSame(403, $exception->statusCode);
             self::assertStringContainsString('403', $exception->getMessage());
+        }
+    }
+
+    /**
+     * @return array<string, array{int, string, class-string<ApiException>}>
+     */
+    public static function unambiguousStatuses(): array
+    {
+        return [
+            '401' => [401, 'UNAUTHORIZED', UnauthorizedException::class],
+            '403' => [403, 'FORBIDDEN', ForbiddenException::class],
+            '404' => [404, 'NOT_FOUND', NotFoundException::class],
+            '422' => [422, 'VALIDATION_FAILED', ValidationFailedException::class],
+            '429' => [429, 'RATE_LIMITED', RateLimitedException::class],
+            '500' => [500, 'INTERNAL', InternalException::class],
+        ];
+    }
+
+    /**
+     * @dataProvider unambiguousStatuses
+     *
+     * @param class-string<ApiException> $expected
+     */
+    public function testABodylessErrorStillCarriesACode(int $status, string $code, string $expected): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport->push(new Response($status, ['Content-Type' => 'text/html'], '<html>Edge page</html>'));
+
+        try {
+            $factory->client(maxRetries: 0)->catalogue->list();
+            self::fail('Expected ' . $expected . '.');
+        } catch (ApiException $exception) {
+            self::assertInstanceOf($expected, $exception);
+            self::assertSame($code, $exception->errorCode);
+            self::assertSame(ErrorCode::from($code), $exception->code());
+        }
+    }
+
+    public function testASynthesisedCodeAgreesWithTheClassTheStatusPicks(): void
+    {
+        // Two mappings from status, one to a class and one to a code. If they
+        // ever disagree the SDK would report a code its own exception class
+        // contradicts.
+        foreach (ErrorFactory::synthesisedCodes() as $status => $code) {
+            $factory = new ClientFactory();
+            $factory->transport->push(new Response($status, [], ''));
+
+            try {
+                $factory->client(maxRetries: 0)->catalogue->list();
+                self::fail('Expected an ApiException for ' . $status . '.');
+            } catch (ApiException $exception) {
+                self::assertSame($code, $exception->errorCode);
+                self::assertContains($code, ErrorFactory::mappedCodes());
+            }
+        }
+    }
+
+    public function testAnAmbiguousStatusIsNotGivenASynthesisedCode(): void
+    {
+        // 409 and 503 each cover two codes. Reporting either would be a guess,
+        // and a caller acting on it would act on the wrong one half the time.
+        foreach ([409, 503] as $status) {
+            $factory = new ClientFactory();
+            $factory->transport->push(new Response($status, [], ''));
+
+            try {
+                $factory->client(maxRetries: 0)->catalogue->list();
+                self::fail('Expected an ApiException for ' . $status . '.');
+            } catch (ApiException $exception) {
+                self::assertNull($exception->errorCode);
+                self::assertSame(ApiException::class, $exception::class);
+            }
         }
     }
 
@@ -165,6 +240,23 @@ final class ErrorMappingTest extends TestCase
             self::fail('Expected a NotFoundException.');
         } catch (ApiException $exception) {
             self::assertSame(404, $exception->getCode());
+        }
+    }
+
+    public function testASuccessfulResponseThatIsNotAJsonObjectIsReported(): void
+    {
+        // A captive portal or a misrouted proxy can answer 200 with valid JSON
+        // that is not a page. Passing it back would surface as a missing key
+        // somewhere far away from the cause.
+        $factory = new ClientFactory();
+        $factory->transport->push(new Response(200, ['Content-Type' => 'application/json'], '[1,2,3]'));
+
+        try {
+            $factory->client(maxRetries: 0)->catalogue->list();
+            self::fail('Expected an ApiException.');
+        } catch (ApiException $exception) {
+            self::assertSame('The API returned a body that is not a JSON object.', $exception->getMessage());
+            self::assertSame(200, $exception->statusCode);
         }
     }
 

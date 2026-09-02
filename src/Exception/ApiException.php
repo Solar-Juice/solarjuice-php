@@ -21,6 +21,8 @@ class ApiException extends SolarJuiceException
     /**
      * @param string|null $errorCode The raw `error.code` string, preserved even when it is not a known code.
      * @param array<int, array<string, mixed>> $details The `error.details` entries, empty when there is nothing to add.
+     * @param int|null $retryAfter Whole seconds from the Retry-After header, null when the response carried none.
+     *                             Any error can carry it, because an edge proxy sends it on more than just a 429.
      */
     public function __construct(
         string $message,
@@ -28,6 +30,7 @@ class ApiException extends SolarJuiceException
         public readonly int $statusCode = 0,
         public readonly array $details = [],
         public readonly ?string $requestId = null,
+        public readonly ?int $retryAfter = null,
         ?Throwable $previous = null,
     ) {
         // The HTTP status doubles as the exception code so that logging which only

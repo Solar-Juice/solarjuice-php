@@ -31,6 +31,8 @@ final class Query
             $pairs[$name] = is_bool($value) ? ($value ? 'true' : 'false') : (string) $value;
         }
 
-        return $pairs === [] ? '' : '?' . http_build_query($pairs, '', '&', PHP_QUERY_RFC3986);
+        // RFC1738 form encoding, which spells a space as +, matches the Node
+        // and Ruby clients byte for byte. The API decodes either.
+        return $pairs === [] ? '' : '?' . http_build_query($pairs, '', '&', PHP_QUERY_RFC1738);
     }
 }

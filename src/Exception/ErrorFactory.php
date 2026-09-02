@@ -56,6 +56,36 @@ final class ErrorFactory
     ];
 
     /**
+     * The code to report when the response carries no error envelope, so that
+     * `$e->errorCode === 'RATE_LIMITED'` still works behind an edge proxy that
+     * answered with an HTML page.
+     *
+     * 409 and 503 are absent for the same reason they are absent above: each
+     * covers two codes, and a guess would be wrong half the time.
+     *
+     * @var array<int, string>
+     */
+    private const CODE_BY_STATUS = [
+        401 => 'UNAUTHORIZED',
+        403 => 'FORBIDDEN',
+        404 => 'NOT_FOUND',
+        422 => 'VALIDATION_FAILED',
+        429 => 'RATE_LIMITED',
+        500 => 'INTERNAL',
+    ];
+
+    /**
+     * The status to code fallback, exposed so a test can hold it against the
+     * status to class mapping above.
+     *
+     * @return array<int, string>
+     */
+    public static function synthesisedCodes(): array
+    {
+        return self::CODE_BY_STATUS;
+    }
+
+    /**
      * The codes this SDK maps to a dedicated exception.
      *
      * @return list<string>
@@ -70,7 +100,8 @@ final class ErrorFactory
         $decoded = json_decode($response->body, true);
         $error = is_array($decoded) && is_array($decoded['error'] ?? null) ? $decoded['error'] : [];
 
-        $code = is_string($error['code'] ?? null) ? $error['code'] : null;
+        $reported = is_string($error['code'] ?? null) ? $error['code'] : null;
+        $code = $reported ?? self::CODE_BY_STATUS[$response->status] ?? null;
         $message = is_string($error['message'] ?? null) && $error['message'] !== ''
             ? $error['message']
             : self::fallbackMessage($response->status);
@@ -82,24 +113,24 @@ final class ErrorFactory
             ? $error['request_id']
             : $response->header('x-request-id');
 
-        $class = ($code !== null ? self::BY_CODE[$code] ?? null : null)
+        // The reported code picks the class; a synthesised one never does, so an
+        // unknown code cannot be mistaken for the status's usual meaning.
+        $class = ($reported !== null ? self::BY_CODE[$reported] ?? null : null)
             ?? self::BY_STATUS[$response->status]
             ?? ApiException::class;
 
-        if ($class === RateLimitedException::class) {
-            $retryAfter = RetryAfter::seconds($response->header('retry-after'));
+        // Retry-After is carried on whatever error the response produced, not
+        // only on a 429: an edge proxy sends it with a 503 as readily.
+        $retryAfter = RetryAfter::seconds($response->header('retry-after'));
 
-            return new RateLimitedException(
-                $message,
-                $code,
-                $response->status,
-                $details,
-                $requestId,
-                $retryAfter === null ? null : (int) ceil($retryAfter),
-            );
-        }
-
-        return new $class($message, $code, $response->status, $details, $requestId);
+        return new $class(
+            $message,
+            $code,
+            $response->status,
+            $details,
+            $requestId,
+            $retryAfter === null ? null : (int) ceil($retryAfter),
+        );
     }
 
     private static function fallbackMessage(int $status): string

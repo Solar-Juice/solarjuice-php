@@ -68,6 +68,27 @@ $client = new Client(
 );
 ```
 
+### The key stays out of your logs
+
+`print_r($client)`, `var_dump`, `var_export`, `serialize` and `dd()` all print
+`sj_live_<keyid>_...` and never the secret, and a `ConfigurationException` from
+the constructor is built without the frame arguments that would otherwise carry
+it onto a Whoops or Ignition page. That covers the ways a key usually escapes.
+
+Passing the key as a plain string still leaves it as an argument of your own
+call to `new Client(...)`, which anything dumping *your* stack frames could
+read. Wrap it, or hand over a closure, and there is nothing there to read:
+
+```php
+use SolarJuice\PartnerApi\ApiKey;
+
+$client = new Client(apiKey: new ApiKey($secrets->get('solarjuice_api_key')));
+$client = new Client(apiKey: static fn (): string => $secrets->get('solarjuice_api_key'));
+```
+
+The closure is called once, while the client is being built, so a missing key is
+still a construction failure rather than a surprise on the first request.
+
 ## Resources
 
 | Call | Returns |
@@ -78,6 +99,7 @@ $client = new Client(
 | `$client->shipping->quote($body)` | A freight quote for a cart and destination |
 | `$client->orders->create($body, $key)` | The order receipt |
 | `$client->orders->list(...)` / `->autoPage(...)` / `->get($id, $etag)` | Your orders |
+| `$client->orders->cancel($id, $note)` | The order, now `cancelled` |
 | `$client->health()` | Liveness, no key required |
 
 Responses are returned as decoded arrays rather than modelled objects. The API
@@ -111,6 +133,10 @@ foreach ($client->inventory->autoPage() as $item) {
 A cursor is only valid for the query it was issued with, so `autoPage()` keeps
 your filters fixed and moves only the cursor. Pass `cursor:` to resume an
 interrupted walk.
+
+If the API ever hands back the cursor it was just given, the walk raises
+`PaginationStalledException` rather than fetching that page for ever and
+spending the whole of your allowance on it.
 
 ### Incremental sync
 
@@ -205,6 +231,23 @@ Every poll costs rate limit allowance even when it answers `304`, so poll no
 faster than every 30 seconds, or poll everything in one request with
 `$client->orders->list(updatedSince: $asOf)`.
 
+### Cancelling an order
+
+A partner can cancel while the order is `received`, `accepted` or `on_hold`,
+which in practice means before operations key it into the fulfilment system.
+After that the API refuses with `VALIDATION_FAILED` and the cancellation has to
+go through your account manager. There is no un-cancel:
+
+```php
+$order = $client->orders->cancel($orderId, 'Customer changed the panel selection');
+
+$order['status']; // cancelled
+```
+
+The note is optional and is recorded on the event; without one the API records
+`cancelled by partner`. Read `status` on the order you hold before calling: a
+second cancel is refused rather than ignored.
+
 ## Errors
 
 Every error carries the code, the HTTP status, the details the API listed, and
@@ -245,6 +288,20 @@ that never reached the API raises `TransportException` instead, and bad client
 settings raise `ConfigurationException`. Everything extends
 `SolarJuiceException`.
 
+`errorCode` is set even when the response is not the documented envelope. An
+edge proxy answering a `429` with an HTML page still produces
+`errorCode === 'RATE_LIMITED'`, so switching on the code is safe. The two
+statuses that cover two codes each, `409` and `503`, are the exception: with no
+envelope to read there is nothing to choose between them, so the code is null
+and you get the base `ApiException` with the status intact.
+
+`retryAfter` is on every error, in whole seconds, whenever the response carried
+a `Retry-After` header, not only on `RateLimitedException`.
+
+A `2xx` whose body is not a JSON object raises too. A captive portal or a
+misrouted proxy answering `200` with an HTML page is not a page of products, and
+surfacing it here beats a missing key three functions later.
+
 Note that a quote coming back `manual_quote_required` or `unavailable` is a
 successful response, not an exception. Check `quote_status` before reading
 `rates`.
@@ -256,6 +313,12 @@ successful response, not an exception. Check `quote_status` before reading
 a ceiling of 8 seconds, and `Retry-After` is honoured over the computed delay
 whenever the API sends one. Other 4xx responses are not retried: they describe
 the request, so repeating it would only spend allowance.
+
+An honoured `Retry-After` is capped at 60 seconds. The API's own values are
+small, but an edge proxy in front of it is not bound by that, and parking a
+synchronous request for the hour one of them asks for is worse than failing. A
+longer value is not slept on: the error is raised straight away with the real
+value on `retryAfter`, and you decide.
 
 Both POST endpoints are safe to retry. Quotes have no side effects, and orders
 are deduplicated by `client_reference`. Set `maxRetries: 0` to handle it
@@ -327,6 +390,11 @@ composer lint    # PSR-12 via phpcs
 `operationId` maps to an implemented method, that the SDK claims no operation the
 spec has dropped, and that every paginated operation has an `autoPage()`
 counterpart. It is what keeps this package honest as the API grows.
+
+`tests/fixtures/error-mapping.json` is a byte identical copy of the table the
+Node and Ruby clients run: one response in, one decision out. It is what keeps
+the three clients answering the same way, so keep the copies in step and add
+cases to all three.
 
 ## Support
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SolarJuice\PartnerApi\Tests;
 
 use PHPUnit\Framework\TestCase;
+use SolarJuice\PartnerApi\Exception\PaginationStalledException;
 use SolarJuice\PartnerApi\Tests\Support\ClientFactory;
 
 final class PaginationTest extends TestCase
@@ -117,6 +118,46 @@ final class PaginationTest extends TestCase
         self::assertSame(1, $factory->transport->callCount());
     }
 
+    public function testAutoPageRaisesWhenTheApiRepeatsACursor(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport
+            ->pushJson(200, ['items' => [['sku' => 'A']], 'next_cursor' => 'stuck'], [
+                'X-Request-Id' => 'req_01J6ZK3M5X8QW2R7Y9V4B1N0PD',
+            ])
+            ->pushJson(200, ['items' => [['sku' => 'A']], 'next_cursor' => 'stuck'], [
+                'X-Request-Id' => 'req_01J6ZK3M5X8QW2R7Y9V4B1N0PD',
+            ])
+            ->pushJson(200, ['items' => [['sku' => 'A']], 'next_cursor' => 'stuck']);
+
+        try {
+            iterator_to_array($factory->client()->catalogue->autoPage());
+            self::fail('Expected a PaginationStalledException.');
+        } catch (PaginationStalledException $exception) {
+            // Two requests, not an unbounded loop burning the allowance.
+            self::assertSame(2, $factory->transport->callCount());
+            self::assertSame('PAGINATION_STALLED', $exception->errorCode);
+            self::assertSame([['cursor' => 'stuck']], $exception->details);
+            self::assertSame('req_01J6ZK3M5X8QW2R7Y9V4B1N0PD', $exception->requestId);
+        }
+    }
+
+    public function testAutoPageRaisesWhenTheFirstPageEchoesAResumedCursor(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport
+            ->pushJson(200, ['items' => [], 'next_cursor' => 'saved-cursor'])
+            ->pushJson(200, ['items' => [], 'next_cursor' => 'saved-cursor']);
+
+        $this->expectException(PaginationStalledException::class);
+
+        try {
+            iterator_to_array($factory->client()->inventory->autoPage(cursor: 'saved-cursor'));
+        } finally {
+            self::assertSame(1, $factory->transport->callCount());
+        }
+    }
+
     public function testBooleanFiltersAreSentAsLiteralsAndNullsAreOmitted(): void
     {
         $factory = new ClientFactory();
@@ -143,6 +184,19 @@ final class PaginationTest extends TestCase
             'updated_since=2026-09-02T04%3A10%3A11Z',
             $factory->transport->lastRequest()->url,
         );
+    }
+
+    public function testASpaceInAQueryValueIsEncodedTheWayTheOtherSdksEncodeIt(): void
+    {
+        // The Node and Ruby clients send a form encoded space, so PHP does too.
+        // The API decodes either, but identical bytes make the three clients
+        // comparable in an access log.
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(200, ['items' => [], 'next_cursor' => null]);
+
+        $factory->client()->catalogue->list(brand: 'GoodWe Australia');
+
+        self::assertStringContainsString('brand=GoodWe+Australia', $factory->transport->lastRequest()->url);
     }
 
     public function testASkuIsUrlEncodedInThePath(): void

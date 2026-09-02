@@ -12,6 +12,7 @@ use SolarJuice\PartnerApi\Exception\StaleDataException;
 use SolarJuice\PartnerApi\Exception\TransportException;
 use SolarJuice\PartnerApi\Http\Response;
 use SolarJuice\PartnerApi\Internal\Backoff;
+use SolarJuice\PartnerApi\Internal\RetryAfter;
 use SolarJuice\PartnerApi\Tests\Support\ClientFactory;
 
 final class RetryTest extends TestCase
@@ -221,6 +222,53 @@ final class RetryTest extends TestCase
         $factory->client(jitter: 1.0)->health();
 
         self::assertSame([Backoff::BASE_SECONDS], $factory->pauses);
+    }
+
+    public function testARetryAfterAtTheCeilingIsStillHonoured(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport
+            ->pushJson(429, self::errorBody('RATE_LIMITED'), ['Retry-After' => '60'])
+            ->pushJson(200, ['status' => 'ok']);
+
+        $factory->client()->health();
+
+        self::assertSame([RetryAfter::MAX_HONOURED_SECONDS], $factory->pauses);
+    }
+
+    public function testARetryAfterAboveTheCeilingIsNotSleptOn(): void
+    {
+        // An edge proxy can send an hour. Sleeping on it would park a web
+        // request for that hour, once per retry, so the caller is handed the
+        // error and the real value instead.
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(429, self::errorBody('RATE_LIMITED'), ['Retry-After' => '3600']);
+
+        try {
+            $factory->client(maxRetries: 3)->health();
+            self::fail('Expected a RateLimitedException.');
+        } catch (RateLimitedException $exception) {
+            self::assertSame(1, $factory->transport->callCount());
+            self::assertSame([], $factory->pauses);
+            self::assertSame(3600, $exception->retryAfter);
+        }
+    }
+
+    public function testALongRetryAfterDateIsNotSleptOnEither(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(503, self::errorBody('STALE_DATA'), [
+            'Retry-After' => gmdate('D, d M Y H:i:s \G\M\T', time() + 900),
+        ]);
+
+        $this->expectException(StaleDataException::class);
+
+        try {
+            $factory->client(maxRetries: 3)->health();
+        } finally {
+            self::assertSame(1, $factory->transport->callCount());
+            self::assertSame([], $factory->pauses);
+        }
     }
 
     public function testTheRetriedRequestIsIdenticalIncludingTheIdempotencyKey(): void

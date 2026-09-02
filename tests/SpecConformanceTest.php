@@ -42,6 +42,7 @@ final class SpecConformanceTest extends TestCase
         'createOrder' => [Orders::class, 'create'],
         'listOrders' => [Orders::class, 'list'],
         'getOrder' => [Orders::class, 'get'],
+        'cancelOrder' => [Orders::class, 'cancel'],
         'getHealth' => [Client::class, 'health'],
     ];
 

@@ -50,11 +50,14 @@ final class Client
     public readonly int $maxRetries;
     public readonly string $userAgent;
 
+    private readonly ApiKey $apiKey;
     private readonly ApiRequester $requester;
 
     /**
-     * @param string|null $apiKey Full key, `sj_live_...` or `sj_test_...`. Falls back to the SOLARJUICE_API_KEY
-     *                            environment variable.
+     * @param string|ApiKey|Closure(): string|null $apiKey Full key, `sj_live_...` or `sj_test_...`. Falls back to
+     *                                                     the SOLARJUICE_API_KEY environment variable. Wrap it in an
+     *                                                     {@see ApiKey}, or pass a closure that returns it, and the
+     *                                                     key never appears in a stack trace of this call.
      * @param string $baseUrl Override only for a proxy or a recorded fixture server.
      * @param float $timeout Seconds allowed per request, retries excluded.
      * @param int $maxRetries Retries after the first attempt. Zero disables retrying.
@@ -66,7 +69,7 @@ final class Client
      * @throws ConfigurationException When no API key is available or a setting is out of range.
      */
     public function __construct(
-        ?string $apiKey = null,
+        string|ApiKey|Closure|null $apiKey = null,
         string $baseUrl = self::DEFAULT_BASE_URL,
         float $timeout = self::DEFAULT_TIMEOUT,
         int $maxRetries = self::DEFAULT_MAX_RETRIES,
@@ -75,20 +78,23 @@ final class Client
         ?Closure $sleeper = null,
         ?Closure $jitter = null,
     ) {
-        $key = self::resolveApiKey($apiKey);
+        $this->apiKey = self::resolveApiKey($apiKey);
 
+        // Every configuration failure below is raised through the factory
+        // because the caller's key is an argument of this frame, and PHP would
+        // otherwise copy it onto the exception's trace.
         if ($timeout <= 0) {
-            throw new ConfigurationException('timeout must be greater than zero seconds.');
+            throw ConfigurationException::withoutTraceArguments('timeout must be greater than zero seconds.');
         }
 
         if ($maxRetries < 0) {
-            throw new ConfigurationException('maxRetries cannot be negative.');
+            throw ConfigurationException::withoutTraceArguments('maxRetries cannot be negative.');
         }
 
         $this->baseUrl = rtrim(trim($baseUrl), '/');
 
         if ($this->baseUrl === '') {
-            throw new ConfigurationException('baseUrl cannot be empty.');
+            throw ConfigurationException::withoutTraceArguments('baseUrl cannot be empty.');
         }
 
         $this->timeout = $timeout;
@@ -96,7 +102,7 @@ final class Client
         $this->userAgent = self::buildUserAgent($userAgent);
 
         $this->requester = new ApiRequester(
-            $key,
+            $this->apiKey,
             $this->baseUrl,
             $this->timeout,
             $this->maxRetries,
@@ -158,19 +164,46 @@ final class Client
         return $this->requester->lastPriceListVersion();
     }
 
-    private static function resolveApiKey(?string $apiKey): string
+    /**
+     * Keeps the API key out of `print_r`, `var_dump` and the debug pages built
+     * on them. The requester goes with it: it is internal, and it is what holds
+     * the key.
+     *
+     * @return array<string, scalar>
+     */
+    public function __debugInfo(): array
     {
-        $key = trim((string) ($apiKey ?? getenv(self::API_KEY_ENV) ?: ''));
+        return [
+            'baseUrl' => $this->baseUrl,
+            'timeout' => $this->timeout,
+            'maxRetries' => $this->maxRetries,
+            'userAgent' => $this->userAgent,
+            'apiKey' => $this->apiKey->masked(),
+        ];
+    }
+
+    /**
+     * @param string|ApiKey|Closure(): string|null $apiKey
+     */
+    private static function resolveApiKey(string|ApiKey|Closure|null $apiKey): ApiKey
+    {
+        if ($apiKey instanceof ApiKey) {
+            return $apiKey;
+        }
+
+        // A closure is read once, here, so that a missing key is a construction
+        // failure rather than a surprise on the first request.
+        $key = trim((string) (($apiKey instanceof Closure ? $apiKey() : $apiKey) ?? getenv(self::API_KEY_ENV) ?: ''));
 
         if ($key === '') {
-            throw new ConfigurationException(sprintf(
+            throw ConfigurationException::withoutTraceArguments(sprintf(
                 'No Solar Juice API key. Pass apiKey to the client or set the %s environment variable. '
                 . 'Keys look like sj_live_<keyid>_<secret> or sj_test_<keyid>_<secret>.',
                 self::API_KEY_ENV,
             ));
         }
 
-        return $key;
+        return new ApiKey($key);
     }
 
     private static function buildUserAgent(?string $suffix): string

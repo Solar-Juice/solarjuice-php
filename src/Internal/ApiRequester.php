@@ -6,6 +6,7 @@ namespace SolarJuice\PartnerApi\Internal;
 
 use Closure;
 use JsonException;
+use SolarJuice\PartnerApi\ApiKey;
 use SolarJuice\PartnerApi\Exception\ApiException;
 use SolarJuice\PartnerApi\Exception\ErrorFactory;
 use SolarJuice\PartnerApi\Exception\TransportException;
@@ -41,7 +42,7 @@ final class ApiRequester
      * @param Closure(): float $jitter Returns a value in [0, 1) for the backoff draw.
      */
     public function __construct(
-        private readonly string $apiKey,
+        private readonly ApiKey $apiKey,
         private readonly string $baseUrl,
         private readonly float $timeout,
         private readonly int $maxRetries,
@@ -96,13 +97,32 @@ final class ApiRequester
                 return new ApiResponse($response->status, $response->headers, self::decode($response));
             }
 
-            if ($attempt < $this->maxRetries && in_array($response->status, self::RETRYABLE_STATUSES, true)) {
-                $this->pause($attempt++, RetryAfter::seconds($response->header('retry-after')));
+            $retryAfter = RetryAfter::seconds($response->header('retry-after'));
+
+            if ($attempt < $this->maxRetries && self::isWorthRetrying($response->status, $retryAfter)) {
+                $this->pause($attempt++, $retryAfter);
                 continue;
             }
 
             throw ErrorFactory::fromResponse($response);
         }
+    }
+
+    /**
+     * Keeps the key out of `print_r($client->orders)` and anything else that
+     * walks its way down to a resource group's requester.
+     *
+     * @return array<string, scalar>
+     */
+    public function __debugInfo(): array
+    {
+        return [
+            'baseUrl' => $this->baseUrl,
+            'timeout' => $this->timeout,
+            'maxRetries' => $this->maxRetries,
+            'userAgent' => $this->userAgent,
+            'apiKey' => $this->apiKey->masked(),
+        ];
     }
 
     public function lastRateLimit(): ?RateLimit
@@ -128,7 +148,7 @@ final class ApiRequester
     private function headers(bool $hasBody, array $extra): array
     {
         $headers = [
-            'Authorization' => 'Bearer ' . $this->apiKey,
+            'Authorization' => 'Bearer ' . $this->apiKey->reveal(),
             'Accept' => 'application/json',
             'User-Agent' => $this->userAgent,
         ];
@@ -140,6 +160,22 @@ final class ApiRequester
         // Caller supplied headers win, which is what makes Idempotency-Key and
         // If-None-Match work without special casing them here.
         return array_merge($headers, $extra);
+    }
+
+    /**
+     * An hour long `Retry-After` is not the API asking for an hour: the API's
+     * own values are seconds, and a proxy in front of it is not bound by that.
+     * Sleeping on it would park a web request or a worker for the whole hour,
+     * so anything past the ceiling is handed back as a rate limited error with
+     * the real value on it and the caller decides.
+     */
+    private static function isWorthRetrying(int $status, ?float $retryAfter): bool
+    {
+        if (!in_array($status, self::RETRYABLE_STATUSES, true)) {
+            return false;
+        }
+
+        return $retryAfter === null || $retryAfter <= RetryAfter::MAX_HONOURED_SECONDS;
     }
 
     private function pause(int $attempt, ?float $retryAfter): void
@@ -172,6 +208,19 @@ final class ApiRequester
         return $value !== null && preg_match('/^-?\d+$/', trim($value)) === 1 ? (int) trim($value) : null;
     }
 
+    private static function notAnObject(string $message, Response $response, ?JsonException $cause = null): ApiException
+    {
+        return new ApiException(
+            $message,
+            null,
+            $response->status,
+            [],
+            $response->header('x-request-id'),
+            null,
+            $cause,
+        );
+    }
+
     /**
      * @param array<string, mixed> $body
      */
@@ -193,16 +242,16 @@ final class ApiRequester
         try {
             $decoded = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
-            throw new ApiException(
-                'The API returned a body that is not valid JSON.',
-                null,
-                $response->status,
-                [],
-                $response->header('x-request-id'),
-                $exception,
-            );
+            throw self::notAnObject('The API returned a body that is not valid JSON.', $response, $exception);
         }
 
-        return is_array($decoded) ? $decoded : null;
+        // A JSON array or scalar where the endpoint documents an object means
+        // something else answered: a captive portal, a proxy, a misrouted host.
+        // Handing it back would surface much later as a missing key.
+        if (!is_array($decoded) || !str_starts_with(ltrim($response->body), '{')) {
+            throw self::notAnObject('The API returned a body that is not a JSON object.', $response);
+        }
+
+        return $decoded;
     }
 }

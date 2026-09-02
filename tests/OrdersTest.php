@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SolarJuice\PartnerApi\Tests;
 
 use PHPUnit\Framework\TestCase;
+use SolarJuice\PartnerApi\Exception\ValidationFailedException;
 use SolarJuice\PartnerApi\Http\Response;
 use SolarJuice\PartnerApi\Tests\Support\ClientFactory;
 
@@ -123,6 +124,86 @@ final class OrdersTest extends TestCase
 
         self::assertSame(1, $factory->transport->callCount());
         self::assertSame([], $factory->pauses);
+    }
+
+    public function testCancelPostsToTheCancelPathAndReturnsTheUpdatedOrder(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(200, ['id' => 'ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD', 'status' => 'cancelled']);
+
+        $order = $factory->client()->orders->cancel('ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD');
+
+        $request = $factory->transport->lastRequest();
+
+        self::assertSame('POST', $request->method);
+        self::assertSame(
+            'https://api.solarjuice.com.au/v1/orders/ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD/cancel',
+            $request->url,
+        );
+        self::assertSame('cancelled', $order['status']);
+    }
+
+    public function testCancelSendsTheNoteWhenOneIsGiven(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(200, ['id' => 'ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD', 'status' => 'cancelled']);
+
+        $factory->client()->orders->cancel(
+            'ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD',
+            'Customer changed the panel selection',
+        );
+
+        $request = $factory->transport->lastRequest();
+
+        self::assertSame('application/json', $request->headers['Content-Type']);
+        self::assertSame(
+            ['note' => 'Customer changed the panel selection'],
+            json_decode((string) $request->body, true),
+        );
+    }
+
+    public function testCancelSendsNoBodyAtAllWithoutANote(): void
+    {
+        // The body is optional, and an empty object is not the same request.
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(200, ['id' => 'ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD', 'status' => 'cancelled']);
+
+        $factory->client()->orders->cancel('ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD');
+
+        $request = $factory->transport->lastRequest();
+
+        self::assertNull($request->body);
+        self::assertArrayNotHasKey('Content-Type', $request->headers);
+    }
+
+    public function testCancelUrlEncodesTheOrderId(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(200, ['status' => 'cancelled']);
+
+        $factory->client()->orders->cancel('ord/one two');
+
+        self::assertSame(
+            'https://api.solarjuice.com.au/v1/orders/ord%2Fone%20two/cancel',
+            $factory->transport->lastRequest()->url,
+        );
+    }
+
+    public function testCancelRaisesWhenTheOrderIsPastThePartnerCancellationWindow(): void
+    {
+        $factory = new ClientFactory();
+        $factory->transport->pushJson(422, [
+            'error' => [
+                'code' => 'VALIDATION_FAILED',
+                'message' => 'order is already processing and cannot be cancelled by the partner',
+                'details' => [],
+                'request_id' => 'req_01J6ZK3M5X8QW2R7Y9V4B1N0PD',
+            ],
+        ]);
+
+        $this->expectException(ValidationFailedException::class);
+
+        $factory->client(maxRetries: 0)->orders->cancel('ord_01J6ZK3M5X8QW2R7Y9V4B1N0PD');
     }
 
     public function testShippingQuotePostsTheCartAndReturnsTheQuote(): void
