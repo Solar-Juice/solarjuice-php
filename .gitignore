@@ -1,0 +1,19 @@
+# Dependencies are resolved per install; a library does not ship a lock file.
+/vendor/
+composer.lock
+
+# Tool state
+/.phpunit.cache/
+.phpunit.result.cache
+/build/
+/coverage/
+phpcs.cache
+
+# Local overrides of the committed *.dist configuration
+phpunit.xml
+phpcs.xml
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<ruleset name="solarjuice-partner-api">
+    <description>PSR-12 across the package. No custom rules, so the output is what any PHP reviewer expects.</description>
+
+    <file>src</file>
+    <file>tests</file>
+
+    <arg name="basepath" value="."/>
+    <arg name="colors"/>
+    <arg value="sp"/>
+
+    <rule ref="PSR12"/>
+</ruleset>
