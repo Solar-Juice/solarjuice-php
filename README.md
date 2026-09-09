@@ -94,7 +94,7 @@ still a construction failure rather than a surprise on the first request.
 | Call | Returns |
 |---|---|
 | `$client->catalogue->list(...)` / `->autoPage(...)` / `->get($sku)` | Products with your channel's price |
-| `$client->inventory->list(...)` / `->autoPage(...)` / `->get($sku)` | Sellable quantity per metro |
+| `$client->inventory->list(...)` / `->autoPage(...)` / `->get($sku, state: ...)` | Sellable quantity per metro, or per state |
 | `$client->specials->list(...)` / `->autoPage(...)` | Specials granted to your channel |
 | `$client->shipping->quote($body)` | A freight quote for a cart and destination |
 | `$client->orders->create($body, $key)` | The order receipt |
@@ -227,6 +227,31 @@ foreach ($client->catalogue->autoPage(updatedSince: $since) as $product) {
 
 Inventory rows that have dropped to zero are still returned by an
 `updatedSince` query, with `total: 0`, so you can clear them.
+
+### Stock in one state
+
+Pass `state:` and the whole answer is scoped to it: `available` is keyed by the
+state and `total` is that state's stock rather than the national figure, so
+there is nothing left to add up on your side.
+
+```php
+foreach ($client->inventory->autoPage(state: 'VIC') as $item) {
+    $store->setStock($item['sku'], $item['total']); // Melbourne's figure
+}
+
+// Queensland is served from Brisbane AND Townsville and comes back as their
+// sum, so a SKU stocked only in Townsville is Queensland stock.
+$qld = $client->inventory->get('20571', state: 'QLD');
+$qld['available']; // ['QLD' => 12302]  (9494 Brisbane + 2808 Townsville)
+$qld['total'];     // 12302, not the national 43318
+```
+
+`NSW`, `VIC`, `QLD`, `WA` and `SA` are the states Solar Juice stocks. Case is
+ignored and the spelt out name works, so `VIC`, `vic` and `Victoria` are the
+same filter. There is no warehouse in `NT`, `TAS` or `ACT`, so those raise a
+`400` rather than returning an empty list that would read as "out of stock
+everywhere". Omit `state:` and you get every metro and the national total,
+exactly as before.
 
 ## Placing an order
 

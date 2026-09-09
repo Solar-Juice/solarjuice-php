@@ -22,11 +22,21 @@ final class Inventory extends ApiResource
     /**
      * One page of inventory.
      *
+     * @param string|null $state Scope the answer to one state: `available` is then keyed by the
+     *                           state and `total` is that state's stock, not the national figure.
+     *                           `QLD` is Brisbane plus Townsville. Case is ignored and `Victoria`
+     *                           works as well as `VIC`. `NT`, `TAS` and `ACT` have no warehouse
+     *                           and are a 400, as is anything else that is not a state.
+     *
      * @return array<string, mixed> The envelope: as_of, as_of_oldest, stale, locations, items, next_cursor.
      */
-    public function list(?int $limit = null, ?string $cursor = null, ?string $updatedSince = null): array
-    {
-        return $this->requester->send('GET', self::PATH, self::query($limit, $cursor, $updatedSince))->data();
+    public function list(
+        ?int $limit = null,
+        ?string $cursor = null,
+        ?string $updatedSince = null,
+        ?string $state = null,
+    ): array {
+        return $this->requester->send('GET', self::PATH, self::query($limit, $cursor, $updatedSince, $state))->data();
     }
 
     /**
@@ -34,9 +44,13 @@ final class Inventory extends ApiResource
      *
      * @return Generator<int, array<string, mixed>>
      */
-    public function autoPage(?int $limit = null, ?string $cursor = null, ?string $updatedSince = null): Generator
-    {
-        yield from $this->walk(self::PATH, self::query($limit, $cursor, $updatedSince));
+    public function autoPage(
+        ?int $limit = null,
+        ?string $cursor = null,
+        ?string $updatedSince = null,
+        ?string $state = null,
+    ): Generator {
+        yield from $this->walk(self::PATH, self::query($limit, $cursor, $updatedSince, $state));
     }
 
     /**
@@ -45,20 +59,23 @@ final class Inventory extends ApiResource
      *
      * @return array<string, mixed>
      */
-    public function get(string $sku): array
+    public function get(string $sku, ?string $state = null): array
     {
-        return $this->requester->send('GET', self::PATH . '/' . rawurlencode($sku))->data();
+        return $this->requester
+            ->send('GET', self::PATH . '/' . rawurlencode($sku), ['state' => $state])
+            ->data();
     }
 
     /**
      * @return array<string, scalar|null>
      */
-    private static function query(?int $limit, ?string $cursor, ?string $updatedSince): array
+    private static function query(?int $limit, ?string $cursor, ?string $updatedSince, ?string $state): array
     {
         return [
             'limit' => $limit,
             'cursor' => $cursor,
             'updated_since' => $updatedSince,
+            'state' => $state,
         ];
     }
 }
