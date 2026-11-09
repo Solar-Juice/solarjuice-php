@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use SolarJuice\PartnerApi\Exception\ApiException;
 use SolarJuice\PartnerApi\Exception\ForbiddenException;
 use SolarJuice\PartnerApi\Exception\IdempotencyConflictException;
+use SolarJuice\PartnerApi\Exception\InsufficientStockException;
 use SolarJuice\PartnerApi\Exception\InternalException;
 use SolarJuice\PartnerApi\Exception\NotFoundException;
 use SolarJuice\PartnerApi\Exception\PriceChangedException;
@@ -45,6 +46,7 @@ final class ErrorTableTest extends TestCase
         'ValidationFailed' => ValidationFailedException::class,
         'RateLimited' => RateLimitedException::class,
         'PriceChanged' => PriceChangedException::class,
+        'InsufficientStock' => InsufficientStockException::class,
         'IdempotencyConflict' => IdempotencyConflictException::class,
         'QuoteUnavailable' => QuoteUnavailableException::class,
         'StaleData' => StaleDataException::class,
