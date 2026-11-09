@@ -10,6 +10,7 @@ use SolarJuice\PartnerApi\Exception\ApiException;
 use SolarJuice\PartnerApi\Exception\ErrorFactory;
 use SolarJuice\PartnerApi\Exception\ForbiddenException;
 use SolarJuice\PartnerApi\Exception\IdempotencyConflictException;
+use SolarJuice\PartnerApi\Exception\InsufficientStockException;
 use SolarJuice\PartnerApi\Exception\InternalException;
 use SolarJuice\PartnerApi\Exception\NotFoundException;
 use SolarJuice\PartnerApi\Exception\PriceChangedException;
@@ -35,6 +36,7 @@ final class ErrorMappingTest extends TestCase
             'validation failed' => [422, 'VALIDATION_FAILED', ValidationFailedException::class],
             'rate limited' => [429, 'RATE_LIMITED', RateLimitedException::class],
             'price changed' => [409, 'PRICE_CHANGED', PriceChangedException::class],
+            'insufficient stock' => [409, 'INSUFFICIENT_STOCK', InsufficientStockException::class],
             'idempotency conflict' => [409, 'IDEMPOTENCY_CONFLICT', IdempotencyConflictException::class],
             'quote unavailable' => [503, 'QUOTE_UNAVAILABLE', QuoteUnavailableException::class],
             'stale data' => [503, 'STALE_DATA', StaleDataException::class],

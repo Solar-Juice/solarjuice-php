@@ -12,6 +12,7 @@ use SolarJuice\PartnerApi\Resources\Inventory;
 use SolarJuice\PartnerApi\Resources\Orders;
 use SolarJuice\PartnerApi\Resources\Shipping;
 use SolarJuice\PartnerApi\Resources\Specials;
+use SolarJuice\PartnerApi\Resources\Webhooks;
 use SolarJuice\PartnerApi\Tests\Support\ClientFactory;
 use Symfony\Component\Yaml\Yaml;
 
@@ -43,6 +44,11 @@ final class SpecConformanceTest extends TestCase
         'listOrders' => [Orders::class, 'list'],
         'getOrder' => [Orders::class, 'get'],
         'cancelOrder' => [Orders::class, 'cancel'],
+        'listWebhooks' => [Webhooks::class, 'list'],
+        'createWebhook' => [Webhooks::class, 'create'],
+        'deleteWebhook' => [Webhooks::class, 'delete'],
+        'enableWebhook' => [Webhooks::class, 'enable'],
+        'testWebhook' => [Webhooks::class, 'test'],
         'getHealth' => [Client::class, 'health'],
     ];
 
@@ -58,6 +64,7 @@ final class SpecConformanceTest extends TestCase
         'specials' => Specials::class,
         'shipping' => Shipping::class,
         'orders' => Orders::class,
+        'webhooks' => Webhooks::class,
     ];
 
     public function testEveryOperationInTheSpecIsImplemented(): void
@@ -91,10 +98,11 @@ final class SpecConformanceTest extends TestCase
 
     public function testEveryListOperationHasAnAutoPagingCounterpart(): void
     {
+        $paginated = self::paginatedOperationIds();
         $listOperations = array_filter(
             self::IMPLEMENTED,
-            static fn (array $target, string $operationId): bool => str_starts_with($operationId, 'list'),
-            ARRAY_FILTER_USE_BOTH,
+            static fn (string $operationId): bool => in_array($operationId, $paginated, true),
+            ARRAY_FILTER_USE_KEY,
         );
 
         self::assertNotEmpty($listOperations);
@@ -121,6 +129,11 @@ final class SpecConformanceTest extends TestCase
         // Shipping quotes are a single POST, so an auto-pager there would only
         // suggest a page-through that does not exist.
         self::assertFalse(method_exists(Shipping::class, 'autoPage'));
+
+        // Webhook endpoints come back in one response with no cursor, so the
+        // same goes for them despite listWebhooks being a list.
+        self::assertNotContains('listWebhooks', self::paginatedOperationIds());
+        self::assertFalse(method_exists(Webhooks::class, 'autoPage'));
     }
 
     public function testEveryResourceGroupHangsOffTheClient(): void
@@ -165,6 +178,34 @@ final class SpecConformanceTest extends TestCase
         }
 
         sort($ids);
+
+        return $ids;
+    }
+
+    /**
+     * Operations that take a cursor, read from the spec rather than guessed
+     * from the name: not every list is paginated.
+     *
+     * @return list<string>
+     */
+    private static function paginatedOperationIds(): array
+    {
+        $ids = [];
+
+        foreach (self::spec()['paths'] as $operations) {
+            foreach ($operations as $operation) {
+                if (!is_array($operation) || !isset($operation['operationId'])) {
+                    continue;
+                }
+
+                foreach ($operation['parameters'] ?? [] as $parameter) {
+                    if (($parameter['$ref'] ?? null) === '#/components/parameters/cursor') {
+                        $ids[] = $operation['operationId'];
+                        break;
+                    }
+                }
+            }
+        }
 
         return $ids;
     }

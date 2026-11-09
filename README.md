@@ -100,6 +100,8 @@ still a construction failure rather than a surprise on the first request.
 | `$client->orders->create($body, $key)` | The order receipt |
 | `$client->orders->list(...)` / `->autoPage(...)` / `->get($id, $etag)` | Your orders |
 | `$client->orders->cancel($id, $note)` | The order, now `cancelled` |
+| `$client->webhooks->list()` / `->create($body)` / `->delete($id)` | Your webhook endpoints |
+| `$client->webhooks->enable($id)` / `->test($id)` | The endpoint, back on / a queued test delivery |
 | `$client->health()` | Liveness, no key required |
 
 Responses are returned as decoded arrays rather than modelled objects. The API
@@ -347,6 +349,36 @@ The note is optional and is recorded on the event; without one the API records
 `cancelled by partner`. Read `status` on the order you hold before calling: a
 second cancel is refused rather than ignored.
 
+## Webhooks
+
+Register an HTTPS URL and Solar Juice tells you when the catalogue or your
+specials change, instead of you polling for it. Any key for your channel can
+manage its endpoints:
+
+```php
+$endpoint = $client->webhooks->create([
+    'url' => 'https://your-host.example/hooks/solarjuice',
+    'events' => ['catalogue.updated', 'specials.updated'],
+]);
+
+storeSecret($endpoint['secret']); // returned here and never again
+
+$client->webhooks->test($endpoint['id']); // a signed webhook.test delivery, within seconds
+```
+
+A delivery is a notification, not the data: on receipt, re-fetch with
+`updated_since`. Verify `X-SolarJuice-Signature` against the raw body before
+trusting it; the reference has the details.
+
+`$client->webhooks->list()` returns every endpoint under `endpoints`, with
+delivery health (`last_status`, `last_error`, `consecutive_failures`). It is a
+single response, so there is no `autoPage()`. An endpoint that fails for long
+enough is switched to `disabled`; once your receiver is healthy,
+`$client->webhooks->enable($id)` turns it back on with the same id and the same
+secret, so there is nothing to redeploy. `test()` on a disabled endpoint raises
+`ValidationFailedException`. `delete($id)` removes an endpoint and invalidates
+its secret.
+
 ## Errors
 
 Every error carries the code, the HTTP status, the details the API listed, and
@@ -376,6 +408,7 @@ try {
 | `ValidationFailedException` | `VALIDATION_FAILED` | 422 |
 | `RateLimitedException` | `RATE_LIMITED` | 429 |
 | `PriceChangedException` | `PRICE_CHANGED` | 409 |
+| `InsufficientStockException` | `INSUFFICIENT_STOCK` | 409 |
 | `IdempotencyConflictException` | `IDEMPOTENCY_CONFLICT` | 409 |
 | `QuoteUnavailableException` | `QUOTE_UNAVAILABLE` | 503 |
 | `StaleDataException` | `STALE_DATA` | 503 |
@@ -390,7 +423,7 @@ settings raise `ConfigurationException`. Everything extends
 `errorCode` is set even when the response is not the documented envelope. An
 edge proxy answering a `429` with an HTML page still produces
 `errorCode === 'RATE_LIMITED'`, so switching on the code is safe. The two
-statuses that cover two codes each, `409` and `503`, are the exception: with no
+statuses that cover more than one code, `409` and `503`, are the exception: with no
 envelope to read there is nothing to choose between them, so the code is null
 and you get the base `ApiException` with the status intact.
 

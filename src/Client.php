@@ -14,6 +14,7 @@ use SolarJuice\PartnerApi\Resources\Inventory;
 use SolarJuice\PartnerApi\Resources\Orders;
 use SolarJuice\PartnerApi\Resources\Shipping;
 use SolarJuice\PartnerApi\Resources\Specials;
+use SolarJuice\PartnerApi\Resources\Webhooks;
 
 /**
  * The entry point to the Solar Juice Partner API.
@@ -44,6 +45,7 @@ final class Client
     public readonly Specials $specials;
     public readonly Shipping $shipping;
     public readonly Orders $orders;
+    public readonly Webhooks $webhooks;
 
     public readonly string $baseUrl;
     public readonly float $timeout;
@@ -121,6 +123,7 @@ final class Client
         $this->specials = new Specials($this->requester);
         $this->shipping = new Shipping($this->requester);
         $this->orders = new Orders($this->requester);
+        $this->webhooks = new Webhooks($this->requester);
     }
 
     /**

@@ -7,6 +7,23 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The major version tracks the API path version: a `1.x` release of this package
 speaks `/v1`.
 
+## [Unreleased]
+
+### Added
+
+- `$client->webhooks` with `list()`, `create()`, `delete()`, `enable()` and
+  `test()`, covering every webhook operation in the spec. `enable()` brings a
+  disabled endpoint back with the same id and secret; `test()` queues a signed
+  `webhook.test` delivery.
+- `InsufficientStockException` and `ErrorCode::InsufficientStock` for the
+  `409 INSUFFICIENT_STOCK` an order gets when a line asks for more than is
+  sellable.
+
+### Changed
+
+- The conformance test reads which list operations are paginated from the
+  spec, since `listWebhooks` returns everything in one response.
+
 ## [1.0.0] - 2026-09-02
 
 Initial release, matching version 1.0.0 of the Solar Juice Partner API.
@@ -38,4 +55,5 @@ Initial release, matching version 1.0.0 of the Solar Juice Partner API.
 - Pluggable `Transport` interface with a curl based default, so the package has
   no runtime dependencies and can be pointed at another HTTP client or a stub.
 
+[Unreleased]: https://github.com/Solar-Juice/solarjuice-php/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/Solar-Juice/solarjuice-php/releases/tag/v1.0.0

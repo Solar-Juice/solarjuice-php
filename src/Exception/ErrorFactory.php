@@ -16,7 +16,7 @@ final class ErrorFactory
 {
     /**
      * The documented mapping. `error.code` is the primary signal because it is
-     * the only thing that separates the two 409s and the two 503s.
+     * the only thing that separates the 409s and the two 503s.
      *
      * The keys are literals rather than ErrorCode cases because fetching an
      * enum property inside a constant expression needs PHP 8.2, and this
@@ -31,6 +31,7 @@ final class ErrorFactory
         'VALIDATION_FAILED' => ValidationFailedException::class,
         'RATE_LIMITED' => RateLimitedException::class,
         'PRICE_CHANGED' => PriceChangedException::class,
+        'INSUFFICIENT_STOCK' => InsufficientStockException::class,
         'IDEMPOTENCY_CONFLICT' => IdempotencyConflictException::class,
         'QUOTE_UNAVAILABLE' => QuoteUnavailableException::class,
         'STALE_DATA' => StaleDataException::class,

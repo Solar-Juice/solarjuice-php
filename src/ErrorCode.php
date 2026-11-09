@@ -20,6 +20,7 @@ enum ErrorCode: string
     case ValidationFailed = 'VALIDATION_FAILED';
     case RateLimited = 'RATE_LIMITED';
     case PriceChanged = 'PRICE_CHANGED';
+    case InsufficientStock = 'INSUFFICIENT_STOCK';
     case IdempotencyConflict = 'IDEMPOTENCY_CONFLICT';
     case QuoteUnavailable = 'QUOTE_UNAVAILABLE';
     case StaleData = 'STALE_DATA';
